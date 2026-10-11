@@ -15,15 +15,9 @@ cd "$(dirname "$0")/.."
 ROOT="$PWD"
 GOLD="$ROOT/.lab/golden"
 mkdir -p "$GOLD"
-# Go 与 Node 需要绝对路径。MSYS/Git Bash 下 /d/... 它们解析不了，要转成
-# Windows 风格；其它平台直接用 pwd 的结果。
-if ABS="$(cd "$GOLD" && pwd -W 2>/dev/null)"; then
-  GOLD_ABS="$ABS"
-else
-  GOLD_ABS="$(cd "$GOLD" && pwd)"
-fi
-# 依赖已由 go.sum 锁定；CI 上没有 module cache，禁掉代理反而拉不到依赖。
-# 本地有 cache 时关掉代理可以避免意外升级，同样尊重外部设置。
+# Go 与 Node 都要绝对路径：Windows 下 /d/... 它们解析不了，非 Windows 下没有
+# pwd -W 这条扩展。用 `||` 串起两个候选，谁成功用谁。
+GOLD_ABS="$(cd "$GOLD" && pwd -W 2>/dev/null || pwd)"
 if [ -z "${GOPROXY:-}" ]; then
   export GOFLAGS="${GOFLAGS:--mod=mod}"
 fi
@@ -38,6 +32,7 @@ package coord
 import (
 	"encoding/hex"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -68,15 +63,16 @@ func TestDumpGolden(t *testing.T) {
 		hex.EncodeToString(ob),
 		hex.EncodeToString(encodeEvolveResp(7, 6, 4, 48)),
 	}
-	if err := os.WriteFile(os.Getenv("GOLD_ABS")+"/go.txt", []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(os.Getenv("GOLD_ABS"), "go.txt"),
+		[]byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
 GOEOF
-( cd "$ROOT/client" && go test ./internal/coord/ -run TestDumpGolden >/dev/null )
+( cd "$ROOT/client" && GOLD_ABS="$GOLD_ABS" go test ./internal/coord/ -run TestDumpGolden >/dev/null )
 
 # --- 2. JS 侧 --------------------------------------------------------------
-( cd "$ROOT/server" && GOLD_ABS="$GOLD_ABS" node -e '
+( cd "$ROOT/server" && node -e '
 const fs = require("fs");
 import("./src/frame.js").then((m) => {
   const enc = (b) => Buffer.from(b).toString("hex");
@@ -92,7 +88,7 @@ import("./src/frame.js").then((m) => {
     enc(m.encodeOpen("www.example.com", 443)),
     enc(m.encodeU32s(7, 6, 4, 48)),
   ];
-  fs.writeFileSync(process.env.GOLD_ABS + "/js.txt", lines.join("\n") + "\n");
+  fs.writeFileSync("../.lab/golden/js.txt", lines.join("\n") + "\n");
 }).catch((e) => { console.error(e); process.exit(1); });
 ')
 
