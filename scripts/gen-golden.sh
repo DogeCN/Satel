@@ -22,7 +22,11 @@ if ABS="$(cd "$GOLD" && pwd -W 2>/dev/null)"; then
 else
   GOLD_ABS="$(cd "$GOLD" && pwd)"
 fi
-export GOPROXY=off GOFLAGS="${GOFLAGS:--mod=mod}"
+# 依赖已由 go.sum 锁定；CI 上没有 module cache，禁掉代理反而拉不到依赖。
+# 本地有 cache 时关掉代理可以避免意外升级，同样尊重外部设置。
+if [ -z "${GOPROXY:-}" ]; then
+  export GOFLAGS="${GOFLAGS:--mod=mod}"
+fi
 
 cleanup() { rm -f "$ROOT/client/internal/coord/zz_dump_test.go"; }
 trap cleanup EXIT
