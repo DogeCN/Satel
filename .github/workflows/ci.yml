@@ -1,0 +1,134 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  client:
+    name: Client (Go ${{ matrix.go }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,   go: '1.26', label: linux-amd64 }
+          - { os: ubuntu-24.04-arm, go: '1.26', label: linux-arm64 }
+          - { os: macos-latest,   go: '1.26', label: darwin-arm64 }
+          - { os: windows-latest, go: '1.26', label: windows-amd64 }
+
+    defaults:
+      run:
+        working-directory: client
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache-dependency-path: client/go.sum
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::以下文件未格式化："; echo "$unformatted"; exit 1
+          fi
+
+      - name: vet
+        run: go vet ./...
+
+      - name: test
+        run: go test -race ./...
+
+      - name: 构建（静态单文件）
+        run: |
+          CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o "satel-${{ matrix.label }}" ./cmd/satel
+          ./satel-${{ matrix.label }} version 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: satel-${{ matrix.label }}
+          path: client/satel-${{ matrix.label }}
+          retention-days: 14
+
+  server:
+    name: Server (Node)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+
+      - name: 语法检查
+        run: |
+          for f in src/*.js test/*.mjs test/helpers/*.mjs; do node --check "$f"; done
+
+      - name: 测试
+        run: npm test
+
+  contract:
+    name: 跨语言帧契约
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: client/go.sum
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+        working-directory: server
+
+      - name: 两侧 golden 必须逐字节一致
+        run: bash scripts/gen-golden.sh
+
+  release:
+    name: Release
+    needs: [client, server, contract]
+    if: github.ref == 'refs/heads/main' && startsWith(github.ref_name, 'v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+
+      - name: 打 tag 时才发
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          echo "构建 $tag 的六个平台产物"
+
+      - name: 构建全部平台
+        run: bash scripts/build-client.sh dist
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

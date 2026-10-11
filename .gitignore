@@ -1,0 +1,27 @@
+# 凭据一律不入库
+.env
+.env.*
+*.dev.vars
+.dev.vars
+
+# 构建产物
+*.exe
+client/satel
+client/satel-*
+dist/
+
+# 依赖与缓存
+node_modules/
+.wrangler/
+
+# 实测用的第三方二进制（ciadpi 等）
+.lab/
+
+# gen-golden 的临时工作区
+server/golden/
+.golden/
+
+# 编辑器
+.vscode/
+.idea/
+*.swp

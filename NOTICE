@@ -1,0 +1,58 @@
+Satel
+Copyright (C) 2026 DogeCN
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.  See the GNU Affero General Public License for more details.
+
+You should have received a copy of the GNU Affero General Public License along
+with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+The full text of the GNU Affero General Public License version 3 is available
+at <https://www.gnu.org/licenses/agpl-3.0.txt> and a copy is distributed with
+this program in the file LICENSE.
+
+--------------------------------------------------------------------------
+Third-party components
+--------------------------------------------------------------------------
+
+This project depends on the following third-party software. Their licenses
+apply to those components, not to Satel itself.
+
+  Go standard library
+    https://go.dev/
+    BSD 3-Clause License
+
+  golang.org/x/sys
+    https://pkg.go.dev/golang.org/x/sys
+    BSD 3-Clause License
+
+  golang.org/x/net
+    https://pkg.go.dev/golang.org/x/net
+    BSD 3-Clause License
+
+  Cloudflare Workers runtime (cloudflare:sockets, WebSocketPair, D1)
+    https://developers.cloudflare.com/workers/
+    Provided as a hosted platform service; used through its public APIs.
+
+--------------------------------------------------------------------------
+
+Name
+----
+
+"Satel" is derived from "Satellite". The project name and the icon in
+docs/icon.svg are original works of this project.
+
+--------------------------------------------------------------------------
+Deployment credentials
+--------------------------------------------------------------------------
+
+No credentials are included in this distribution. The deployment script reads
+CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID and PASSWORD from the environment
+(or from a local .env that is excluded by .gitignore). Rotating any credential
+that was ever committed to a remote is the responsibility of the operator.

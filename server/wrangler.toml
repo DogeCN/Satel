@@ -1,0 +1,32 @@
+# Satel coordination Worker.
+#
+# database_id 由 `wrangler d1 create satel` 打印（在该目录下运行会自动改写本文件）。
+# 重建数据库后必须同步改这里，否则 Worker 起来会报 "D1 database … has been deleted"。
+
+name = "satel"
+main = "src/index.js"
+compatibility_date = "2025-09-01"
+
+# Non-secret tuning knobs (protocol.md section 6).
+[vars]
+POOL_MAX = "48"
+TOP_K = "8"
+# Ops the deployed fleet can execute. Evolution keeps mutations inside this set so
+# the pool is not filled with strategies no client can run. This is the portable
+# (userspace) op set — widen it if you ship a privileged backend.
+CAPS = "split,tlsrf,oob,hostsplit,case"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "satel"
+database_id = "a442d347-a5eb-43ac-8f0b-8a7b957b4af2"
+
+# Every 6 hours at :17 (protocol.md / task spec).
+[triggers]
+crons = ["17 */6 * * *"]
+
+# Custom domain (satel.0xa.cc.cd) is bound out of band, not declared here: managing
+# zone routes needs zone-level token permissions, which a Workers-only token does
+# not have. Bind it once from the dashboard (Workers -> satel -> Settings ->
+# Domains & Routes) or with a token that can edit the zone. It is required for
+# clients behind SNI blocking — *.workers.dev is RST'd in mainland China.
