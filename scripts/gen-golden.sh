@@ -59,7 +59,7 @@ func TestDumpGolden(t *testing.T) {
 		hex.EncodeToString(ob),
 		hex.EncodeToString(encodeEvolveResp(7, 6, 4, 48)),
 	}
-	if err := os.WriteFile("$GOLD_ABS/go.txt", []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(os.Getenv("GOLD_ABS")+"/go.txt", []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

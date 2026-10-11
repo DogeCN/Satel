@@ -238,12 +238,25 @@ entry = host_len(1)+host + method_len(1)+method + flags(1) + rtt(4) + ts(8) + ki
 
 **3. 跨语言 golden 扩到 JS 侧。** `scripts/gen-golden.sh` 原先只回填 Go 测试的
 golden，JS 测试里那份是手抄的——改完线格式后它静默过期，直到 `node --test` 报错才
-发现。现在脚本两侧都回填（幂等，回填不到会打警告）。
+发现。现在脚本两侧都回填。
 
-**当前状态**：客户端能发出 REPORT，线上 Worker 仍回
-`STATUS(code=2 D1_TYPE_ERROR: Type 'undefined' not supported for value 'undefined')`
-——部署的 `d1.js` 还是按 `sid`/`host_hash` 写的。迁移 + `recordReport` 改写 +
-`method_stat`/`hint` 表由另一路在做，做完才谈得上真机验证。
+**4. 打通后又踩了三处**（`docs/findings.md` §57 有完整记录，都属于"看着对、其实没通"）：
+
+- **`proto` 没人填**：`Item.Proto` 加了字段但 engine 两个回报点都没赋值，服务端按
+  协议拒收为"回报条目字段为空"。
+- **迁移必须单独跑**：`schema.sql` 全是 `CREATE TABLE IF NOT EXISTS`，对**已存在的
+  库完全无效**（每条都是 no-op，却报成功）。线上库已有老 `outcome` 表，真机症状是
+  `table outcome has no column named host`。用幂等 CLI：
+  `node src/migrate.js`（内部 `PRAGMA table_info` 逐列判断，可重复执行）。
+- **golden 脚本自己坏了**：那段 Go 用未加引号的 heredoc 嵌入，`"$GOLD_ABS"` 被
+  **shell** 展开成路径字面量，Go 又把反斜杠当转义，写到了诡异的文件名。脚本于是
+  一直读旧文件、一直报"两侧一致"。已改为 `os.Getenv("GOLD_ABS")`。
+  **教训：golden 的价值全在"两边真各跑一遍"，一旦这步变成 no-op，它就退化成两份
+  手工抄的 hex 比对，比没有更危险。**
+
+**真机验收已通过**（详见 findings §58）：HELLO v2 受理、REPORT 落库且
+`outcome` 总数 == `report_batch.SUM(accepted)`（幂等无双计）、hints 下发后客户端
+首次访问 `en.m.wikipedia.org` **1.53s 直奔 `[tunnel]`**（无 hint 时同一步要 57s）。
 
 ## 5. 硬约束与已验证的结论
 
@@ -420,6 +433,12 @@ cd ../server && set -a && . ../.env && set +a && npx wrangler@4 deploy
 
 # 运维
 satel admin evolve --worker wss://satel.0xa.cc.cd --password … --admin-key …
+
+# 数据库：schema.sql 只对**全新库**有效（全是 IF NOT EXISTS，改不了已有表）
+node src/migrate.js                      # 幂等迁移已有库（PRAGMA table_info 逐列判断）
+npx wrangler d1 execute satel --remote --file=./schema.sql    # 全新库建表
+# 建库/删库后**必须**同步 wrangler.toml 的 database_id，否则 Worker 报
+# "D1 database … has been deleted"
 
 # 诊断
 satel probe --handshake --fetch www.example.com      # 某站现在能不能用

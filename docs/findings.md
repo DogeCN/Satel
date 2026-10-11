@@ -1410,3 +1410,77 @@ deleted.`。`wrangler d1 list --json` 返回 `[]`——库里**一行都不剩**
 
 **留给下一个人的**：`server/wrangler.toml` 里的 `database_id` 是硬编码的，库一重建
 就必须同步改，否则 Worker 起来就是这个报错。已在 toml 顶部注释写明。
+
+## 57. 三处踩坑：回报链路上"看起来都对了"却一行都没落库
+
+方法级上报打通的过程里，**连续三次**都是"代码写完、测试全绿、真机一行没进去"。
+每一次的失败点都不一样，值得记下来：
+
+### 57.1 回报静默：ticker 排在连接之前
+
+`flushReports` 只挂在 15 分钟的 ticker 上，而第一次 flush 发生在 `syncLoop` 启动时
+——那会儿浏览器还没连上，队列是空的。症状是**没有任何错误日志**。
+详见 §55。修法：回报单独一个 45s 短周期。
+
+### 57.2 `proto` 没人填
+
+`Item` 加了 `Proto` 字段，线格式也要求了，但 engine 的两个回报点都没填它
+（`RecordAttempt` 与 `Record`）。服务端按协议拒收：`STATUS(code=2 回报条目字段为空)`。
+
+**"字段存在"不等于"字段有值"。** 一个必填字段要串过 5 层（proxy → engine → coord →
+frame → 服务端校验），漏掉任何一层的症状都是同一条笼统的拒绝信息。
+
+### 57.3 schema 是 `CREATE TABLE IF NOT EXISTS`，所以它**不会**改已存在的表
+
+线上库先前就有 `outcome` 表（老 schema）。跑 `schema.sql` 全部"成功"——因为
+`IF NOT EXISTS` 让每条 CREATE 都是 no-op。新表建好了，`outcome` 却还是老样子。
+真机症状：`D1_ERROR: table outcome has no column named host`。
+
+必须跑 `migrations/0002_*.sql`（或幂等 CLI `node src/migrate.js`，它用
+`PRAGMA table_info` 判断缺哪列）。**建表脚本对已有库是无效的**，这条要写进部署步骤。
+
+顺带：`schema.sql` 里故意不放 `ALTER TABLE`——SQLite 的 `ADD COLUMN` 没有
+`IF NOT EXISTS`，放进去会让脚本第二次执行直接失败。
+
+### 57.4 golden 脚本自己坏了（而且坏了很久）
+
+`scripts/gen-golden.sh` 里那段 Go 是用**未加引号的 heredoc**（`<< GOEOF`）嵌入的，
+里面的 `"$GOLD_ABS"` 被 **shell** 当变量展开成了当时的路径字面量——一个带反斜杠的
+Windows 路径，被 Go 字符串当作转义序列，文件写到了一个诡异的文件名。脚本却以为成功。
+
+后果是它一直报"两侧一致"（因为它读的是上一次遗留的文件），而我抄给你 hex 时是**从
+终端复制的**，被截断了——你据此发现 224 vs 228 的长度不符，是对的。
+现在改成 `os.Getenv("GOLD_ABS")`（让 Go 自己去环境变量里取，绕开 shell 展开），
+并且重跑后长度变成 122 / 228 / 168 / 38 / 32。
+
+**教训**：跨语言 golden 的价值全在"两边真的各跑了一遍"。一旦这一步变成 no-op，
+它就退化成"两份手工抄的 hex 比对"，比没有更危险——它会一直给你绿灯。
+
+## 58. 真机验收（方法级上报全链路）
+
+```
+05:36:51 [sync] tls 策略库 v2: 8 条可用（丢弃 0 条）        ← HELLO v2 被受理
+05:39:40 [sync] 回报 3/3 条                                   ← REPORT 被受理
+05:43:38 [sync] 后缀经验 1 条                                 ← hints 下发并装载
+```
+
+D1 侧对账（3 次真实访问）：
+
+```
+host             method     kind  proto  ok  batch_id
+www.baidu.com    @direct    ok    tls    1   418c9651d06ba27ff0afd2e629ae8459
+discord.com      @direct    ok    tls    1   418c9651d06ba27ff0afd2e629ae8459
+www.bing.com     @direct    ok    tls    1   418c9651d06ba27ff0afd2e629ae8459
+```
+
+幂等性对账：`outcome` 总数 5 == `report_batch` 的 `SUM(accepted)` 5，两个 batchID 各
+只出现一次——重放没有双计。
+
+hints 回环：手工种一条 `m.wikipedia.org / @tunnel`（15 胜 0 负 / 5 主机），
+客户端 `[sync] 后缀经验 1 条` 后首次访问 `en.m.wikipedia.org`：
+**1.53s 直接 `[tunnel]`，零浪费探测**（没有 hint 时要 57s）。
+
+挖 hint 的规则经合成数据验证：同后缀 ≥3 主机、≥6 次观测才挖；共享托管空间
+（`user.github.io` / `foo.blogspot.com` / `my.herokuapp.com`）**一律拒绝**——
+把一个用户的结论推给所有用户是最坏情况。可注册域本身（`wikipedia.org`，没有子域）
+也拒绝，因为没有可聚合的维度。
