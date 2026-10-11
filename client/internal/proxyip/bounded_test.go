@@ -156,13 +156,23 @@ func TestFastFailureAcceleratesNext(t *testing.T) {
 // 就退化成"同时全发"，队首的先跑优势随之消失。
 func TestStaggerFloorHoldsWhilePredecessorInFlight(t *testing.T) {
 	h := newHarness(t)
+	// onDial 由多个候选的 goroutine 并发调用，必须加锁——否则 -race 必然报竞争，
+	// 而不带 -race 的本地跑只是靠运气通过。
+	var mu sync.Mutex
 	var starts []time.Duration
 	var base time.Time
 	rec := func(ctx context.Context) {
+		mu.Lock()
+		defer mu.Unlock()
 		if base.IsZero() {
 			base = time.Now()
 		}
 		starts = append(starts, time.Since(base))
+	}
+	snapshot := func() []time.Duration {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]time.Duration(nil), starts...)
 	}
 	a := h.relay("a", behavior{hangCtx: true, onDial: rec}) // 队首挂起、永不返回
 	b := h.relay("b", behavior{delay: 5 * time.Millisecond, conn: newFakeConn(), onDial: rec})
@@ -173,11 +183,12 @@ func TestStaggerFloorHoldsWhilePredecessorInFlight(t *testing.T) {
 		t.Fatalf("后位候选应胜出: %v", err)
 	}
 	conn.Close()
-	if len(starts) < 2 {
+	got := snapshot()
+	if len(got) < 2 {
 		t.Fatal("两条都该起跑")
 	}
-	if gap := starts[1] - starts[0]; gap < raceStagger-60*time.Millisecond {
-		t.Fatalf("前驱在途时第 2 条仅 %v 就起跑——250ms 地板失效: %v", gap, starts)
+	if gap := got[1] - got[0]; gap < raceStagger-60*time.Millisecond {
+		t.Fatalf("前驱在途时第 2 条仅 %v 就起跑——250ms 地板失效: %v", gap, got)
 	}
 }
 

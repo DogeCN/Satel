@@ -15,8 +15,13 @@ cd "$(dirname "$0")/.."
 ROOT="$PWD"
 GOLD="$ROOT/.lab/golden"
 mkdir -p "$GOLD"
-# Go 与 Node 都只认 Windows 风格路径；MSYS 的 /d/... 它们解析不了。
-GOLD_ABS="$(cd "$GOLD" && pwd -W)"
+# Go 与 Node 需要绝对路径。MSYS/Git Bash 下 /d/... 它们解析不了，要转成
+# Windows 风格；其它平台直接用 pwd 的结果。
+if ABS="$(cd "$GOLD" && pwd -W 2>/dev/null)"; then
+  GOLD_ABS="$ABS"
+else
+  GOLD_ABS="$(cd "$GOLD" && pwd)"
+fi
 export GOPROXY=off GOFLAGS="${GOFLAGS:--mod=mod}"
 
 cleanup() { rm -f "$ROOT/client/internal/coord/zz_dump_test.go"; }
